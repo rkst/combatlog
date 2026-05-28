@@ -30,3 +30,9 @@ custom-protocol = ["tauri/custom-protocol"]
 opt-level = 3
 lto = "thin"
 strip = true
+
+# rquest v2.x was yanked from crates.io after the crate was renamed to `wreq`.
+# Pin to the v2.2.1 git tag so resolution succeeds without rewriting the wcl.rs
+# call sites that depend on the rquest 2.x API.
+[patch.crates-io]
+rquest = { git = "https://github.com/0x676e67/wreq.git", tag = "v2.2.1" }

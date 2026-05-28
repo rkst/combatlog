@@ -36,6 +36,11 @@ case "$TARGET" in
     NODE_BIN_PATH="node-${NODE_VERSION}-linux-arm64/bin/node"
     EXT=""
     ;;
+  aarch64-apple-darwin)
+    NODE_ARCHIVE="node-${NODE_VERSION}-darwin-arm64.tar.xz"
+    NODE_BIN_PATH="node-${NODE_VERSION}-darwin-arm64/bin/node"
+    EXT=""
+    ;;
   *)
     echo "unsupported target: $TARGET" >&2
     exit 2

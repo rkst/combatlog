@@ -139,6 +139,30 @@
   [data-theme="dark"]  .theme-toggle-icon.sun  { opacity: .3; }
   [data-theme="dark"]  .theme-toggle-icon.moon { opacity: .9; }
 
+  .toggle-row {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 12px; margin-bottom: 16px;
+  }
+  .toggle-row .toggle-label {
+    font-size: .78rem; font-weight: 400; color: var(--text);
+    user-select: none;
+  }
+  .switch {
+    flex-shrink: 0;
+    width: 36px; height: 20px; border-radius: 10px;
+    background: var(--toggle-bg); border: none; cursor: pointer;
+    padding: 0; transition: background .25s;
+    display: flex; align-items: center;
+  }
+  .switch::after {
+    content: ''; width: 16px; height: 16px; border-radius: 50%;
+    background: var(--surface); box-shadow: 0 1px 3px rgba(0,0,0,.15);
+    margin-left: 2px; transition: transform .25s, background .25s;
+  }
+  .switch[aria-pressed="true"] { background: var(--accent); }
+  .switch[aria-pressed="true"]::after { transform: translateX(16px); }
+  .switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow); }
+
   .field { margin-bottom: 16px; }
   .field label {
     display: block; font-size: .7rem; font-weight: 500;
@@ -378,6 +402,11 @@
         </div>
       </div>
 
+      <div class="toggle-row" id="deleteAfterField" style="display:none">
+        <span class="toggle-label">Delete local log after upload</span>
+        <button type="button" id="deleteAfterToggle" class="switch" role="switch" aria-pressed="false" aria-label="Delete local log after upload"></button>
+      </div>
+
       <button type="submit" id="btn" class="btn">Upload Log</button>
     </form>
 
@@ -420,6 +449,20 @@ document.getElementById('themeToggle').addEventListener('click', () => {
   const cur = document.documentElement.getAttribute('data-theme') || 'light';
   applyTheme(cur === 'light' ? 'dark' : 'light');
 });
+
+const DELETE_AFTER_KEY = 'wcl_delete_after';
+const deleteAfterField = document.getElementById('deleteAfterField');
+const deleteAfterToggle = document.getElementById('deleteAfterToggle');
+if (isTauri) {
+  deleteAfterField.style.display = '';
+  const saved = localStorage.getItem(DELETE_AFTER_KEY) === '1';
+  deleteAfterToggle.setAttribute('aria-pressed', saved ? 'true' : 'false');
+  deleteAfterToggle.addEventListener('click', () => {
+    const next = deleteAfterToggle.getAttribute('aria-pressed') !== 'true';
+    deleteAfterToggle.setAttribute('aria-pressed', next ? 'true' : 'false');
+    localStorage.setItem(DELETE_AFTER_KEY, next ? '1' : '0');
+  });
+}
 
 const STORE_KEY = 'wcl_upload_creds';
 function readCreds() {
@@ -609,6 +652,7 @@ async function tauriUpload() {
         region: parseInt(document.getElementById('region').value, 10),
         visibility: parseInt(document.getElementById('visibility').value, 10),
         guildId: null,
+        deleteAfter: deleteAfterToggle.getAttribute('aria-pressed') === 'true',
       }
     });
   } catch (err) {

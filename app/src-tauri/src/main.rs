@@ -24,6 +24,8 @@ struct UploadArgs {
     region: i32,
     visibility: i32,
     guild_id: Option<i64>,
+    #[serde(default)]
+    delete_after: bool,
 }
 
 #[derive(Serialize)]
@@ -288,6 +290,16 @@ async fn run_upload(app: &AppHandle, args: UploadArgs) -> Result<()> {
     match report_code {
         Some(code) => {
             session.terminate_report(&code).await?;
+            if args.delete_after {
+                if let Err(e) = tokio::fs::remove_file(&log_path).await {
+                    emit_progress(
+                        app,
+                        "cleanup",
+                        format!("Upload complete, but could not delete local file: {e}"),
+                        100,
+                    );
+                }
+            }
             let url = format!("https://www.warcraftlogs.com/reports/{code}");
             let _ = app.emit("upload:done", json!({"url": url, "code": code}));
             Ok(())
