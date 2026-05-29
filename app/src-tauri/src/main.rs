@@ -62,7 +62,93 @@ async fn pick_log_file(app: AppHandle) -> Option<FileInfo> {
     Some(describe_file(&pb))
 }
 
-/// file info for a user-dropped path 
+/// native folder picker for the logs-cleanup setting.
+#[tauri::command]
+async fn pick_logs_folder(app: AppHandle) -> Option<String> {
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog().file().pick_folder(move |path| {
+        let _ = tx.send(path);
+    });
+    let path = rx.await.ok().flatten()?;
+    let pb = path.as_path()?.to_path_buf();
+    Some(pb.to_string_lossy().to_string())
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CleanupResult {
+    count: usize,
+    bytes_freed: u64,
+}
+
+/// Delete combat log files in `folder` whose mtime is older than `max_age_days`.
+/// Top-level only, no symlinks. Errors reading the folder (e.g. removable drive
+/// offline) are swallowed and return zero counts.
+#[tauri::command]
+async fn cleanup_old_logs(folder: String, max_age_days: u32) -> Result<CleanupResult, String> {
+    tokio::task::spawn_blocking(move || -> Result<CleanupResult, String> {
+        let re = regex::Regex::new(r"^WoWCombatLog-\d{6}_\d{6}\.txt$")
+            .map_err(|e| e.to_string())?;
+        let cutoff = match std::time::SystemTime::now()
+            .checked_sub(std::time::Duration::from_secs(max_age_days.max(1) as u64 * 86_400))
+        {
+            Some(t) => t,
+            None => return Ok(CleanupResult { count: 0, bytes_freed: 0 }),
+        };
+        let entries = match std::fs::read_dir(&folder) {
+            Ok(e) => e,
+            Err(e) => {
+                eprintln!("cleanup_old_logs: cannot read {folder}: {e}");
+                return Ok(CleanupResult { count: 0, bytes_freed: 0 });
+            }
+        };
+        let mut count = 0usize;
+        let mut bytes_freed = 0u64;
+        for entry in entries.flatten() {
+            let path = entry.path();
+            let meta = match std::fs::symlink_metadata(&path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let ft = meta.file_type();
+            if ft.is_symlink() || !ft.is_file() {
+                continue;
+            }
+            let name = match path.file_name().and_then(|s| s.to_str()) {
+                Some(n) => n,
+                None => continue,
+            };
+            if !re.is_match(name) {
+                continue;
+            }
+            let modified = match meta.modified() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if modified >= cutoff {
+                continue;
+            }
+            let size = meta.len();
+            match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    count += 1;
+                    bytes_freed += size;
+                }
+                Err(e) => {
+                    eprintln!(
+                        "cleanup_old_logs: could not delete {}: {e}",
+                        path.display()
+                    );
+                }
+            }
+        }
+        Ok(CleanupResult { count, bytes_freed })
+    })
+    .await
+    .map_err(|e| format!("cleanup task failed: {e}"))?
+}
+
+/// file info for a user-dropped path
 #[tauri::command]
 fn file_info(path: String) -> Result<FileInfo, String> {
     let pb = std::path::PathBuf::from(&path);
@@ -116,6 +202,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             app_version,
             pick_log_file,
+            pick_logs_folder,
+            cleanup_old_logs,
             file_info,
             open_url,
             start_upload

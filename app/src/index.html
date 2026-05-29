@@ -163,6 +163,39 @@
   .switch[aria-pressed="true"]::after { transform: translateX(16px); }
   .switch:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--accent-glow); }
 
+  .cleanup-controls { display: flex; align-items: center; gap: 6px; min-width: 0; }
+  .cleanup-btn {
+    flex-shrink: 1; max-width: 240px; min-width: 0;
+    padding: 6px 12px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: transparent; color: var(--text-dim);
+    font-family: 'Lexend', sans-serif; font-size: .72rem;
+    cursor: pointer; transition: all .15s;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .cleanup-btn:hover { border-color: var(--accent); color: var(--accent); }
+  .cleanup-btn.has-folder { color: var(--text); }
+  .cleanup-clear {
+    flex-shrink: 0; padding: 2px 6px;
+    border: none; background: transparent; color: var(--text-dim);
+    font-size: 1rem; line-height: 1; cursor: pointer; transition: color .15s;
+  }
+  .cleanup-clear:hover { color: var(--error); }
+  .cleanup-days {
+    flex-shrink: 0; width: 64px;
+    padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: 3px;
+    background: var(--input-bg); color: var(--text);
+    font-family: 'Lexend', sans-serif; font-size: .8rem;
+    text-align: center;
+    -webkit-appearance: none; appearance: none;
+    transition: border-color .2s, box-shadow .2s, background .25s, color .25s;
+  }
+  .cleanup-days:focus {
+    outline: none; border-color: var(--accent);
+    box-shadow: 0 0 0 2px var(--accent-glow);
+  }
+
   .field { margin-bottom: 16px; }
   .field label {
     display: block; font-size: .7rem; font-weight: 500;
@@ -407,6 +440,19 @@
         <button type="button" id="deleteAfterToggle" class="switch" role="switch" aria-pressed="false" aria-label="Delete local log after upload"></button>
       </div>
 
+      <div class="toggle-row" id="logsFolderField" style="display:none">
+        <span class="toggle-label">Cleanup folder</span>
+        <div class="cleanup-controls">
+          <button type="button" id="logsFolderBtn" class="cleanup-btn">Choose folder…</button>
+          <button type="button" id="logsFolderClear" class="cleanup-clear" style="display:none" title="Clear" aria-label="Clear cleanup folder">×</button>
+        </div>
+      </div>
+
+      <div class="toggle-row" id="cleanupDaysField" style="display:none">
+        <span class="toggle-label">Delete logs older than (days)</span>
+        <input type="number" id="cleanupDaysInput" class="cleanup-days" min="1" max="365" value="7">
+      </div>
+
       <button type="submit" id="btn" class="btn">Upload Log</button>
     </form>
 
@@ -462,6 +508,80 @@ if (isTauri) {
     deleteAfterToggle.setAttribute('aria-pressed', next ? 'true' : 'false');
     localStorage.setItem(DELETE_AFTER_KEY, next ? '1' : '0');
   });
+}
+
+const LOGS_FOLDER_KEY = 'wcl_logs_folder';
+const CLEANUP_DAYS_KEY = 'wcl_cleanup_days';
+const logsFolderField = document.getElementById('logsFolderField');
+const logsFolderBtn = document.getElementById('logsFolderBtn');
+const logsFolderClear = document.getElementById('logsFolderClear');
+const cleanupDaysField = document.getElementById('cleanupDaysField');
+const cleanupDaysInput = document.getElementById('cleanupDaysInput');
+
+function shortPath(p) {
+  if (!p) return '';
+  const segs = p.split(/[\\/]/).filter(Boolean);
+  if (segs.length <= 2) return p;
+  return '…/' + segs.slice(-2).join('/');
+}
+
+function renderCleanupUI() {
+  const folder = localStorage.getItem(LOGS_FOLDER_KEY);
+  if (folder) {
+    logsFolderBtn.textContent = shortPath(folder);
+    logsFolderBtn.title = folder;
+    logsFolderBtn.classList.add('has-folder');
+    logsFolderClear.style.display = '';
+    cleanupDaysField.style.display = '';
+  } else {
+    logsFolderBtn.textContent = 'Choose folder…';
+    logsFolderBtn.title = '';
+    logsFolderBtn.classList.remove('has-folder');
+    logsFolderClear.style.display = 'none';
+    cleanupDaysField.style.display = 'none';
+  }
+}
+
+if (isTauri) {
+  logsFolderField.style.display = '';
+  const savedDays = Number(localStorage.getItem(CLEANUP_DAYS_KEY)) || 7;
+  cleanupDaysInput.value = Math.max(1, Math.min(365, savedDays));
+  renderCleanupUI();
+
+  logsFolderBtn.addEventListener('click', async () => {
+    const picked = await invoke('pick_logs_folder');
+    if (picked) {
+      localStorage.setItem(LOGS_FOLDER_KEY, picked);
+      renderCleanupUI();
+    }
+  });
+  logsFolderClear.addEventListener('click', () => {
+    localStorage.removeItem(LOGS_FOLDER_KEY);
+    renderCleanupUI();
+  });
+  cleanupDaysInput.addEventListener('change', () => {
+    let n = Number(cleanupDaysInput.value) || 7;
+    n = Math.max(1, Math.min(365, n));
+    cleanupDaysInput.value = n;
+    localStorage.setItem(CLEANUP_DAYS_KEY, String(n));
+  });
+
+  const startupFolder = localStorage.getItem(LOGS_FOLDER_KEY);
+  if (startupFolder) {
+    const startupDays = Math.max(1, Math.min(365,
+      Number(localStorage.getItem(CLEANUP_DAYS_KEY)) || 7));
+    invoke('cleanup_old_logs', { folder: startupFolder, maxAgeDays: startupDays })
+      .then((res) => {
+        if (!res || !res.count) return;
+        const statusEl = document.getElementById('status');
+        if (statusEl && !statusEl.textContent) {
+          const plural = res.count === 1 ? '' : 's';
+          statusEl.textContent =
+            `Cleaned up ${res.count} old log file${plural} (${fmtSize(res.bytesFreed)})`;
+        }
+      })
+      .catch(() => {});
+  }
 }
 
 const STORE_KEY = 'wcl_upload_creds';
